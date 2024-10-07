@@ -1,0 +1,781 @@
+---
+title: "random_forest"
+format: html
+editor: visual
+author: Theresa Nutz and Nora Müller 
+---
+
+# PROJECT: Is the Pill Outdated?
+
+AUTHORS: Theresa Nutz, Nora Müller, Hao-Ting
+
+DATA: pairfam w1-w14
+
+# Setup
+
+```{r Setup}
+# Codes to install the need packaged and it'll output the package(s) that may have failed to load
+knitr::opts_chunk$set(echo = TRUE)
+p_needed <-
+  c("tidyverse", "randomForest",
+    "DataExplorer", "skimr",  "VIM",   # for EDA
+    "modelsummary",                    # Descriptive statistics & Models Summary
+    "haven", "foreign",                                     # for STATA data type
+    "tidymodels", "themis",    # a collection of packages for Machine Learning & Random Forest
+    "doParallel",     # for Parallel Processing
+    "ranger", "bonsai", "partykit", # engine for fitting Random Dorest models
+    "vip", "iml",            # for plotting variable importance
+    "treeshap","kernelshap", "shapviz", "SHAPforxgboost", # for SHAP Values & Plots
+    "GGally",         # for Correlation Matrix
+    "DALEXtra",       # for partial dependence plots
+    "caret",          # for Recursive Feature Elimination (RFE)
+    "corrplot",       # for Correlation Matrix
+    "cowplot",        # for Combining Plots
+    "fastDummies"    # Create Dummy Variables
+    )
+
+packages <- rownames(installed.packages())
+p_to_install <- p_needed[!(p_needed %in% packages)]
+
+if (length(p_to_install) > 0) {
+  install.packages(p_to_install)
+}
+sapply(p_needed, require, character.only = TRUE)
+```
+
+```{r}
+# Check your tidymodels libraries are up-to-date 
+tidymodels::tidymodels_update()
+```
+
+# Preprocess Data
+
+```{r}
+preprocess_dataset <- function(file_path) {
+  df_raw <- read_dta(file_path)  # Open Stata datafile
+  
+  df_processed <- df_raw %>%   
+    # Operationalization
+    mutate(
+      pincnet_log = log(ifelse(pincnet == 0, 1, pincnet)),
+      hhincnet_log = log(ifelse(hhincnet == 0, 1, hhincnet)),
+      pinc_decile = ntile(log(ifelse(pincnet == 0, 1, pincnet)), 10),
+      hhincnet_decile = ntile(log(ifelse(hhincnet == 0, 1, hhincnet)), 10),
+      bmi_category = factor(cut(bmi, breaks = c(-Inf, 18.5, 25, 30, Inf),
+                                     labels = c("Underweight", "Normal", "Overweight", "Obese")),
+                                 levels = c("Underweight", "Normal", "Overweight", "Obese"), ordered = TRUE),
+      relstat = case_when(relstat %in% c(1, 5, 6, 9) ~ "Single",
+                          relstat %in% c(2, 7, 10) ~ "LAT",
+                          relstat %in% c(3, 8, 11) ~ "Cohabiting",
+                          relstat %in% c(4, 5) ~ "Married"),
+      nkids = factor(if_else(nkids < 3, nkids, 3), levels = c(0, 1, 2, 3), ordered = TRUE),
+      empl = case_when(lfs %in% c(1:8) ~ "Education/not working",
+                       lfs %in% c(9,12,13) ~ "Full-time or self-employment",
+                       lfs %in% c(10,11) ~ "Marginal or part-time employment"),
+      edu = factor(case_when(isced %in% c(1,2) ~ "Basic",
+                         isced %in% c(0,3,4) ~ "Intermediate",
+                         isced %in% c(5,6,7,8) ~ "Advanced"), 
+               levels = c("Basic", "Intermediate", "Advanced"), ordered = TRUE),
+      migback = case_when(migstatus == 1 ~ 0,
+                          migstatus %in% c(2,3) ~ 1),
+      urban = case_when(gkpol %in% 1:4 ~ 0, gkpol %in% 5:7 ~ 1),
+      sex_often = case_when(sexfreq >= 4 ~ 1,
+                            sexfreq < 4 ~ 0),
+      denomination = case_when(sd30 == 7 ~ "None", 
+                               sd30 == 1 ~ "Roman Catholic", 
+                               sd30 == 2 ~ "Protestant",
+                               sd30 == 3 ~ "Muslim",
+                               sd30 %in% c(4, 5, 6) ~ "Other"),
+      rel = factor(case_when(sd31 == 6 ~ "Never", 
+                             sd31 == 5 ~ "Seldom",
+                             sd31 == 4 ~ "Occasionally",
+                             sd31 %in% c(1, 2, 3) ~ "Frequent"), 
+                    levels = c("Never", "Seldom", "Occasionally", "Frequent"), ordered = TRUE),
+      gendercomp = case_when(gendercomp == 0 ~ "No children",
+                             gendercomp == 1 ~ "Equal gender composition",
+                             gendercomp == 2 ~ "More boys",
+                             gendercomp == 3 ~ "More girls"),
+      migstatus = case_when(migstatus == 1 ~ "No migration background",
+                            migstatus == 2 ~ "1st generation",
+                            migstatus == 3 ~ "2nd generation"),
+      health = factor(case_when(health == 1 ~ "Bad",
+                            health == 2 ~ "Not so good",
+                            health == 3 ~ "Satisfactory",
+                            health == 4 ~ "Good",
+                            health == 5 ~ "Very good"), 
+                  levels = c("Bad", "Not so good", "Satisfactory", "Good", "Very good"), ordered = TRUE), 
+      region = case_when(region == 0 ~ "Western Germany",
+                         region == 1 ~ "Eastern Germany",
+                         region == 2 ~ "Abroad"),
+      ethni = case_when(ethni == 1 ~ "German native",
+                        ethni == 2 ~ "Ethnic-German",
+                        ethni == 3 ~ "Half-German",
+                        ethni == 4 ~ "Turkish background",
+                        ethni == 5 ~ "Other non-German background"),
+      addchild = case_when(addchild == 0 ~ "No",
+                        addchild == 1 ~ "Yes",
+                        addchild == 2 ~ "Unsure")#,
+      #abortion = case_when(abortion == 0 ~ "No abortion", abortion == 1 ~ "Abortion")
+      ) %>% 
+
+    # Convert the variables to Factors & Numericals
+    mutate(
+      across(c(hormon, hormon_iudh, hormon_iudnh, hormon_iudor, 
+               relstat, nkids, lfs, isced, migstatus, health, region, bula, 
+               addchild, gkpol, deadchild, gendercomp, sd30, sd31, 
+               abortion, ethni, empl, edu, migback, urban, 
+               sex_often, denomination, rel), 
+             as.factor),
+      
+      across(c(id, wave, age, pincnet, hhincnet, height, weight, 
+               bmi, val1i3, val1i4, val1i5, sexfreq, extraversion, 
+               agreeableness, conscientiousness, neuroticism, 
+               openness, pincnet_log, hhincnet_log), 
+             as.numeric)
+    ) %>% 
+    
+    # Select the desired Variables
+    select(id, wave, age, relstat, nkids, 
+           pincnet_log, hhincnet_log, pinc_decile, pincnet, hhincnet, hhincnet_decile,
+           empl, edu, ethni,
+           migback, health, height, weight, bmi, bmi_category,
+           val1i3, val1i4, val1i5, region, bula,
+           addchild, urban, sex_often, deadchild, gendercomp, extraversion,
+           agreeableness, conscientiousness, neuroticism, openness, denomination,
+           rel, abortion,
+           hormon, hormon_iudh, hormon_iudnh, hormon_iudor
+           ) %>% 
+  
+  return(df_processed)
+}
+
+```
+
+```{r}
+# Run 1st Preprocessing Step
+setwd("H:/oral_contraception_over_time/data")
+df1_processed <- preprocess_dataset("rf_coh1_27.dta")
+df2_processed <- preprocess_dataset("rf_coh2_27.dta")
+df3_processed <- preprocess_dataset("rf_coh2_37.dta")
+df4_processed <- preprocess_dataset("rf_coh3_37.dta")
+```
+
+```{r}
+# SAVE each dataframe separately in .RData format
+setwd("H:/oral_contraception_over_time/data")
+
+save(df1_processed, file = "df1_processed.RData") # For df1_processed
+save(df2_processed, file = "df2_processed.RData") # For df2_processed
+save(df3_processed, file = "df3_processed.RData") # For df3_processed
+save(df4_processed, file = "df4_processed.RData") # For df4_processed
+```
+
+```{r}
+# LOAD Up each dataframe
+
+setwd("H:/oral_contraception_over_time/data")
+#setwd("C:/Users/Bryan Chan/Documents/Projects/oral_contraception_over_time/data/")
+load("df1_processed.RData") 
+load("df2_processed.RData") 
+load("df3_processed.RData") 
+load("df4_processed.RData") 
+```
+
+# Labels
+
+Label Type 1
+
+```{r}
+labels <- c(
+  id = "Person identifier",
+  age = "Age",
+  wave = "Survey year",
+  relstat = "Relationship status",
+  nkids = "Number of children",
+  pinc_decile = "Personal net income",
+  hhincnet_decile = "Household net income",
+  empl = "Labor force status",
+  edu = "Educational level",
+  ethni = "Ethnicity",
+  migback = "Migration background",
+  health = "General health",
+  height = "Height",
+  weight = "Weight",
+  bmi_category = "Body Mass Index",
+  val1i3 = "Values: Female employment",
+  val1i4 = "Values: Division of housework",
+  val1i5 = "Values: Maternal employment", 
+  region = "Region of birth",
+  addchild = "Additional children planned",
+  urban = "Urbanity of region",
+  sex_often = "Frequent sexual intercourse",
+  gendercomp = "Childrens' gender composition",
+  extraversion = "Big 5: Extraversion",
+  agreeableness = "Big 5: Agreeableness",
+  conscientiousness = "Big 5: Conscientiousness",
+  neuroticism = "Big 5: Neuroticism",
+  openness = "Big 5: Openness",
+  denomination = "Religious denomination",
+  rel = "Religious event attendance",
+  abortion = "Abortion experience",
+  urban_X1 = "Urbanity of region",
+  abortion_X1 = "Abortion experience",
+  sex_often_X1 = "Frequent sexual intercourse",
+  migback_X1 = "Migration background",
+  nkids_X1 = "Number of children: 1",
+  nkids_X2 = "Number of children: 2",
+  nkids_X3 = "Number of children: 3",
+  relstat_LAT = "Relationship status: LAT",
+  relstat_Married = "Relationship status: Married",
+  relstat_Single = "Relationship status: Single",
+  empl_Full.time.or.self.employment = "Labor force status: Full time or self employment",
+  empl_Marginal.or.part.time.employment = "Labor force status: Marginal or part time employment",
+  ethni_German.native = "Ethnicity: German native",
+  ethni_Half.German = "Ethnicity: Half German",
+  ethni_Other.non.German.background = "Ethnicity: Other non German background",
+  ethni_Turkish.background = "Ethnicity: Turkish background",
+  bmi_category_Normal = "Body Mass Index: Normal",
+  bmi_category_Overweight = "Body Mass Index: Overweight",
+  bmi_category_Obese = "Body Mass Index: Obese",
+  region_Eastern.Germany = "Region of birth: Eastern Germany",
+  region_Western.Germany = "Region of birth: Western Germany",
+  addchild_Unsure = "Additional children planned: Unsure",
+  addchild_Yes = "Additional children planned: Yes",
+  denomination_None = "Religious denomination: None",
+  denomination_Other = "Religious denomination: Other",
+  denomination_Protestant = "Religious denomination: Protestant",
+  denomination_Roman.Catholic = "Religious denomination: Roman Catholic",
+  rel_1 = "Religious event attendance: Never",
+  rel_2 = "Religious event attendance: Occasionally",
+  rel_Seldom = "Religious event attendance: Seldom",
+  edu_Basic = "Educational level: Basic",
+  edu_Intermediate = "Educational level: Intermediate",
+  health_Good = "General health: Good",
+  health_Not.so.good = "General health: Not so good",
+  health_Satisfactory = "General health: Satisfactory",
+  health_Very.good = "General health: Very good"
+  )
+```
+
+Label Type 2
+
+```{r}
+labels <- c(
+  id = "Person identifier",
+  age = "Age",
+  wave = "Survey year",
+  relstat = "Relationship status",
+  nkids = "Number of children",
+  pinc_decile = "Personal net income",
+  hhincnet_decile = "Household net income",
+  empl = "Labor force status",
+  edu = "Educational level",
+  ethni = "Ethnicity",
+  migback = "Migration background",
+  health = "General health",
+  height = "Height",
+  weight = "Weight",
+  bmi_category = "Body Mass Index",
+  val1i3 = "Values: Female employment",
+  val1i4 = "Values: Division of housework",
+  val1i5 = "Values: Maternal employment", 
+  region = "Region of birth",
+  addchild = "Additional children planned",
+  urban = "Urbanity of region",
+  sex_often = "Frequent sexual intercourse",
+  gendercomp = "Childrens' gender composition",
+  extraversion = "Big 5: Extraversion",
+  agreeableness = "Big 5: Agreeableness",
+  conscientiousness = "Big 5: Conscientiousness",
+  neuroticism = "Big 5: Neuroticism",
+  openness = "Big 5: Openness",
+  denomination = "Religious denomination",
+  rel = "Religious event attendance",
+  abortion = "Abortion experience",
+  urban_X1 = "Urbanity of region",
+  abortion_X1 = "Abortion experience",
+  sex_often_X1 = "Frequent sexual intercourse",
+  migback_X1 = "Migration background",
+  nkids_1 = "Number of children: 1",
+  nkids_2 = "Number of children: 2",
+  nkids_3 = "Number of children: 3 and more",
+  relstat_LAT = "Relationship status: LAT",
+  relstat_Married = "Relationship status: Married",
+  relstat_Single = "Relationship status: Single",
+  empl_Full.time.or.self.employment = "Labor force status: Full time or self employment",
+  empl_Marginal.or.part.time.employment = "Labor force status: Marginal or part time employment",
+  ethni_German.native = "Ethnicity: German native",
+  ethni_Half.German = "Ethnicity: Half German",
+  ethni_Other.non.German.background = "Ethnicity: Other non German background",
+  ethni_Turkish.background = "Ethnicity: Turkish background",
+  bmi_category_1 = "Body Mass Index: Normal",
+  bmi_category_2 = "Body Mass Index: Overweight",
+  bmi_category_3= "Body Mass Index: Obese",
+  region_Eastern.Germany = "Region of birth: Eastern Germany",
+  region_Western.Germany = "Region of birth: Western Germany",
+  addchild_Unsure = "Additional children planned: Unsure",
+  addchild_Yes = "Additional children planned: Yes",
+  denomination_None = "Religious denomination: None",
+  denomination_Other = "Religious denomination: Other",
+  denomination_Protestant = "Religious denomination: Protestant",
+  denomination_Roman.Catholic = "Religious denomination: Roman Catholic",
+  rel_1 = "Religious event attendance: Seldom",
+  rel_2= "Religious event attendance: Occasionally",
+  rel_3 = "Religious event attendance: Frequent",
+  edu_1 = "Educational level: Intermediate",
+  edu_2 = "Educational level: Advanced",
+  health_3 = "General health: Good",
+  health_1 = "General health: Not so good",
+  health_2 = "General health: Satisfactory",
+  health_4 = "General health: Very good"
+)
+```
+
+```{r}
+df1_rf_train_prep %>%  colnames
+```
+
+# Data Exploration
+
+## Missing values
+
+```{r}
+# Missing value distribution in df_RAW
+NAs_df1_raw <- df1_raw %>% 
+  plot_missing(title = "Distribution of NAs (df1_raw)")
+
+NAs_df2_raw <- df2_raw %>% 
+  plot_missing(title = "Distribution of NAs (df2_raw)")
+
+NAs_df3_raw <- df3_raw %>% 
+  plot_missing(title = "Distribution of NAs (df3_raw)")
+
+NAs_df4_raw <- df4_raw %>% 
+  plot_missing(title = "Distribution of NAs (df4_raw)")
+
+setwd("H:/oral_contraception_over_time/results")
+ggsave("NAs_df1_raw.png", NAs_df1_raw, width = 8, height = 10)
+ggsave("NAs_df2_raw.png", NAs_df2_raw, width = 8, height = 10)
+ggsave("NAs_df3_raw.png", NAs_df3_raw, width = 8, height = 10)
+ggsave("NAs_df4_raw.png", NAs_df4_raw, width = 8, height = 10)
+```
+
+```{r}
+# Missing value distribution in df_PROCESSED
+NAs_df1_processed <- df1_processed %>% 
+  plot_missing(title = "Distribution of NAs (df1_processed)")
+
+NAs_df2_processed <- df2_processed %>% 
+  plot_missing(title = "Distribution of NAs (df2_processed)")
+
+NAs_df3_processed <- df3_processed %>% 
+  plot_missing(title = "Distribution of NAs (df3_processed)")
+
+NAs_df4_processed <- df4_processed %>% 
+  plot_missing(title = "Distribution of NAs (df4_processed)")
+
+setwd("H:/oral_contraception_over_time/results")
+ggsave("NAs_df1_processed.png", NAs_df1_processed, width = 8, height = 10)
+ggsave("NAs_df2_processed.png", NAs_df2_processed, width = 8, height = 10)
+ggsave("NAs_df3_processed.png", NAs_df3_processed, width = 8, height = 10)
+ggsave("NAs_df4_processed.png", NAs_df4_processed, width = 8, height = 10)
+```
+
+```{r}
+plot(aggr(df1_processed, plot = FALSE), 
+     numbers = TRUE, prop = FALSE)
+
+plot(aggr(df2_processed, plot = FALSE), 
+     numbers = TRUE, prop = FALSE)
+
+plot(aggr(df3_processed, plot = FALSE), 
+     numbers = TRUE, prop = FALSE)
+
+plot(aggr(df4_processed, plot = FALSE), 
+     numbers = TRUE, prop = FALSE)
+```
+
+## Descriptive Graphs
+
+```{r}
+# Frequency distribution
+save_Descriptive_plots_A <- function(df, df_name) {
+  DGplot_categorical <- df %>% 
+    plot_bar()
+  DGplot_continuous <- df %>% 
+    plot_histogram()
+
+  for (i in 1:length(DGplot_categorical)) {
+    ggsave(paste0("H:/oral_contraception_over_time/results/DGplotA_", 
+                  df_name, "_categorical_", i, ".png"), 
+           DGplot_categorical[[i]], width = 8, height = 10)
+  }
+  
+  ggsave(paste0("H:/oral_contraception_over_time/results/DGplotA_", 
+                df_name, "_continuous.png"), 
+         DGplot_continuous$page_1, width = 8, height = 10)
+}
+
+save_Descriptive_plots_A(df1_processed, "df1")
+save_Descriptive_plots_A(df2_processed, "df2")
+save_Descriptive_plots_A(df3_processed, "df3")
+save_Descriptive_plots_A(df4_processed, "df4")
+```
+
+```{r}
+# Distribution by the Target variable
+
+save_Descriptive_plots_B <- function(df, df_name) {
+  df_categorical <- df %>% 
+    plot_bar(by  = "hormon_iudor")
+
+  df_continuous <- df %>% 
+    plot_qq(by = "hormon_iudor")
+
+  ggsave(paste0("H:/oral_contraception_over_time/results/DGplotB_", 
+                df_name, "_categorical_1.png"), 
+         df_categorical$page_1, width = 8, height = 10)
+  ggsave(paste0("H:/oral_contraception_over_time/results/DGplotB_", 
+                df_name, "_categorical_2.png"), 
+         df_categorical$page_2, width = 8, height = 10)
+  ggsave(paste0("H:/oral_contraception_over_time/results/DGplotB_", 
+                df_name, "_continuous_1.png"), 
+         df_continuous$page_1, width = 8, height = 10)
+  ggsave(paste0("H:/oral_contraception_over_time/results/DGplotB_", 
+                df_name, "_continuous_2.png"), 
+         df_continuous$page_2, width = 8, height = 10)
+}
+
+save_Descriptive_plots_B(df1_processed, "df1")
+save_Descriptive_plots_B(df2_processed, "df2")
+save_Descriptive_plots_B(df3_processed, "df3")
+save_Descriptive_plots_B(df4_processed, "df4")
+```
+
+## Descriptive Stats
+
+```{r}
+# List of dataframes
+df_list <- list(df1_processed, df2_processed, df3_processed, df4_processed)
+
+# List of source names
+source_names <- c("Birth cohort 1 (age 27)", "Birth cohort 2 (age 27)", "Birth cohort 2 (age 37)", "Birth cohort 3 (age 37)")
+
+DS_summary_continious <- data.frame()
+DS_summary_categorical <- data.frame()
+
+# Loop over each dataframe
+for(i in 1:length(df_list)) {
+  DS_current <- datasummary_skim(df_list[[i]], type = "numeric", output = "data.frame")
+  DS_current$Source <- source_names[i]
+  DS_summary_continious <- rbind(DS_summary_continious, DS_current)
+}
+
+# Loop over each dataframe
+for(i in 1:length(df_list)) {
+  DS_current <- datasummary_skim(df_list[[i]], type = "categorical", output = "data.frame")
+  DS_current$Source <- source_names[i]
+  DS_summary_categorical <- rbind(DS_summary_categorical, DS_current)
+}
+
+DS_summary_continious
+DS_summary_categorical
+
+write.csv(DS_summary_continious,
+          "H:/oral_contraception_over_time/results/DS_summary_continious.csv")
+write.csv(DS_summary_categorical,
+          "H:/oral_contraception_over_time/results/DS_summary_categorical.csv")
+```
+
+# Data Cleaning (Final)
+
+```{r}
+# Create Final Dataframe
+clean_select_df <- function(df) {
+  cleaned_df <- df %>% 
+    select(wave, relstat, nkids, pinc_decile, hhincnet_decile,
+           empl, edu, ethni, health, bmi_category,
+           val1i3, val1i4, val1i5, region, 
+           addchild, urban, sex_often, 
+           extraversion, agreeableness, conscientiousness, neuroticism, openness, 
+           denomination, rel, abortion, 
+           migback,
+           hormon_iudor) %>% 
+    na.omit() # deletes all observations containing missing values
+  return(cleaned_df)
+}
+
+# Apply the function
+df1_cleaned <- clean_select_df(df1_processed)
+df2_cleaned <- clean_select_df(df2_processed)
+df3_cleaned <- clean_select_df(df3_processed)
+df4_cleaned <- clean_select_df(df4_processed)
+```
+
+```{r}
+# Save '_cleaned' as csv
+setwd("H:/oral_contraception_over_time/data")
+write.csv(df1_cleaned, "df1_cleaned.csv")
+write.csv(df2_cleaned, "df2_cleaned.csv")
+write.csv(df3_cleaned, "df3_cleaned.csv")
+write.csv(df4_cleaned, "df4_cleaned.csv")
+```
+
+## Class Imbalance
+
+Explore the imbalanced target variable:
+
+```{r}
+
+
+hormon_iudor_df1 <- df1_raw %>%
+  count(hormon_iudor) %>%
+  mutate(prop = n / sum(n) * 100) %>% 
+  ggplot(aes(x = hormon_iudor, y = n)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(prop, 1), "%")), vjust = -0.5) +
+  labs(x = "Class", y = "Count", title = "Class Imbalance of DF 1") 
+  ggsave("results/hormon_iudor_df1.png", hormon_iudor_df1) 
+
+hormon_iudor_df2 <- df2_raw %>%
+  count(hormon_iudor) %>%
+  mutate(prop = n / sum(n) * 100) %>% 
+  ggplot(aes(x = hormon_iudor, y = n)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(prop, 1), "%")), vjust = -0.5) +
+  labs(x = "Class", y = "Count", title = "Class Imbalance of DF 2")
+  ggsave("results/hormon_iudor_df2.png", hormon_iudor_df2) 
+
+hormon_iudor_df3 <- df3_raw %>%
+  count(hormon_iudor) %>%
+  mutate(prop = n / sum(n) * 100) %>% 
+  ggplot(aes(x = hormon_iudor, y = n)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(prop, 1), "%")), vjust = -0.5) +
+  labs(x = "Class", y = "Count", title = "Class Imbalance of DF 3") 
+  ggsave("results/hormon_iudor_df3.png", hormon_iudor_df3) 
+
+hormon_iudor_df4 <- df4_raw %>%
+  count(hormon_iudor) %>%
+  mutate(prop = n / sum(n) * 100) %>% 
+  ggplot(aes(x = hormon_iudor, y = n)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(prop, 1), "%")), vjust = -0.5) +
+  labs(x = "Class", y = "Count", title = "Class Imbalance of DF 4")  
+  ggsave("results/hormon_iudor_df4.png", hormon_iudor_df4) 
+  
+hormon_iudor_df1
+hormon_iudor_df2
+hormon_iudor_df3
+hormon_iudor_df4
+```
+
+Based on these ratios:
+
+df1: Slight imbalance, but not extreme. You might consider using class weights. df2: Significant imbalance. You should definitely use class weights or oversampling. df3: Slight imbalance, but not extreme. You might consider using class weights. df4: Almost balanced. No need for class weights or oversampling.
+
+## Descriptive Stats (Final)
+
+Descriptive Stats of the Final Dataframe
+
+```{r}
+# Descriptive Stats of the Final Dataframe
+df_final_list <- list(df1_cleaned, df2_cleaned, df3_cleaned, df4_cleaned) # List of dataframes
+source_names <- c("Birth cohort 1 (age 27)", "Birth cohort 2 (age 27)", 
+                  "Birth cohort 2 (age 37)", "Birth cohort 3 (age 37)") # List of source names
+
+DS_summary_final_continious <- data.frame()
+DS_summary_final_categorical <- data.frame()
+
+
+for(i in 1:length(df_final_list)) {
+  DS_current <- datasummary_skim(df_final_list[[i]], type = "numeric", output = "data.frame")
+  DS_current$Source <- source_names[i]
+  DS_summary_final_continious <- rbind(DS_summary_final_continious, DS_current)
+} # Loop over each dataframe
+
+
+for(i in 1:length(df_final_list)) {
+  DS_current <- datasummary_skim(df_final_list[[i]], type = "categorical", output = "data.frame")
+  DS_current$Source <- source_names[i]
+  DS_summary_final_categorical <- rbind(DS_summary_final_categorical, DS_current)
+} # Loop over each dataframe
+
+DS_summary_final_continious
+DS_summary_final_categorical
+
+write.csv(DS_summary_final_continious,
+          "H:/oral_contraception_over_time/results/DS_summary_final_continious.csv")
+write.csv(DS_summary_final_categorical,
+          "H:/oral_contraception_over_time/results/DS_summary_final_categorical.csv")
+```
+
+## Correlation Matrix (Final)
+
+Custom Function for creating Correlation Table
+
+```{r}
+#' correlation_matrix
+#' Creates a publication-ready / formatted correlation matrix, using `Hmisc::rcorr` in the backend.
+#'
+#' @param df dataframe; containing numeric and/or logical columns to calculate correlations for
+#' @param type character; specifies the type of correlations to compute; gets passed to `Hmisc::rcorr`; options are `"pearson"` or `"spearman"`; defaults to `"pearson"`
+#' @param digits integer/double; number of decimals to show in the correlation matrix; gets passed to `formatC`; defaults to `3`
+#' @param decimal.mark character; which decimal.mark to use; gets passed to `formatC`; defaults to `.`
+#' @param use character; which part of the correlation matrix to display; options are `"all"`, `"upper"`, `"lower"`; defaults to `"all"`
+#' @param show_significance boolean; whether to add `*` to represent the significance levels for the correlations; defaults to `TRUE`
+#' @param replace_diagonal boolean; whether to replace the correlations on the diagonal; defaults to `FALSE`
+#' @param replacement character; what to replace the diagonal and/or upper/lower triangles with; defaults to `""` (empty string)
+#'
+#' @return a correlation matrix
+#' @export
+#'
+#' @examples
+#' `correlation_matrix(iris)`
+#' `correlation_matrix(mtcars)`
+correlation_matrix <- function(df, 
+                               type = "pearson",
+                               digits = 3, 
+                               decimal.mark = ".",
+                               use = "all", 
+                               show_significance = TRUE, 
+                               replace_diagonal = FALSE, 
+                               replacement = ""){
+  
+  # check arguments
+  stopifnot({
+    is.numeric(digits)
+    digits >= 0
+    use %in% c("all", "upper", "lower")
+    is.logical(replace_diagonal)
+    is.logical(show_significance)
+    is.character(replacement)
+  })
+  # we need the Hmisc package for this
+  require(Hmisc)
+  
+  # retain only numeric and boolean columns
+  isNumericOrBoolean = vapply(df, function(x) is.numeric(x) | is.logical(x), logical(1))
+  if (sum(!isNumericOrBoolean) > 0) {
+    cat('Dropping non-numeric/-boolean column(s):', paste(names(isNumericOrBoolean)[!isNumericOrBoolean], collapse = ', '), '\n\n')
+  }
+  df = df[isNumericOrBoolean]
+  
+  # transform input data frame to matrix
+  x <- as.matrix(df)
+  
+  # run correlation analysis using Hmisc package
+  correlation_matrix <- Hmisc::rcorr(x, type = )
+  R <- correlation_matrix$r # Matrix of correlation coeficients
+  p <- correlation_matrix$P # Matrix of p-value 
+  
+  # transform correlations to specific character format
+  Rformatted = formatC(R, format = 'f', digits = digits, decimal.mark = decimal.mark)
+  
+  # if there are any negative numbers, we want to put a space before the positives to align all
+  if (sum(R < 0) > 0) {
+    Rformatted = ifelse(R > 0, paste0(' ', Rformatted), Rformatted)
+  }
+  
+  # add significance levels if desired
+  if (show_significance) {
+    # define notions for significance levels; spacing is important.
+    stars <- ifelse(is.na(p), "   ", ifelse(p < .001, "***", ifelse(p < .01, "** ", ifelse(p < .05, "*  ", "   "))))
+    Rformatted = paste0(Rformatted, stars)
+  }
+  # build a new matrix that includes the formatted correlations and their significance stars
+  Rnew <- matrix(Rformatted, ncol = ncol(x))
+  rownames(Rnew) <- colnames(x)
+  colnames(Rnew) <- paste(colnames(x), "", sep =" ")
+  
+  # replace undesired values
+  if (use == 'upper') {
+    Rnew[lower.tri(Rnew, diag = replace_diagonal)] <- replacement
+  } else if (use == 'lower') {
+    Rnew[upper.tri(Rnew, diag = replace_diagonal)] <- replacement
+  } else if (replace_diagonal) {
+    diag(Rnew) <- replacement
+  }
+  
+  return(Rnew)
+}
+
+save_correlation_matrix = function(df, filename, ...) {
+  write.csv2(correlation_matrix(df, ...), file = filename)
+}
+```
+
+```{r}
+
+
+# Correlation Table with Significance  (only for Continious variables)
+correlation_table <- list(df1 = df1_cleaned, df2 = df2_cleaned, df3 = df3_cleaned, df4 = df4_cleaned) %>%
+  imap(~ .x %>% 
+         correlation_matrix(use = 'lower') %>%  
+         as.data.frame() %>%
+         mutate(df = .y)) %>%
+  bind_rows()
+
+write.csv(correlation_table, file = "results/correlation_table.csv")
+
+```
+
+```{r}
+
+
+# Correlation Plot with Significance (only for Continious variables)
+correlation_plot_df1 <- df1_cleaned %>%
+  ggpairs(title = "Correlation & Scatterplot")
+  ggsave("results/correlation_plot_df1.png", correlation_plot_df1, width = 20, height = 20)   
+  
+correlation_plot_df2 <- df2_cleaned %>%
+  ggpairs(title = "Correlation & Scatterplot") 
+  ggsave("results/correlation_plot_df2.png", correlation_plot_df2, width = 20, height = 20)   
+
+correlation_plot_df3 <- df3_cleaned %>%
+  ggpairs(title = "Correlation & Scatterplot") 
+  ggsave("results/correlation_plot_df3.png", correlation_plot_df3, width = 20, height = 20)   
+  
+correlation_plot_df4 <- df4_cleaned %>%
+  ggpairs(title = "Correlation & Scatterplot")
+  ggsave("results/correlation_plot_df4.png", correlation_plot_df4, width = 20, height = 20)   
+```
+
+
+# Final Preprocessing
+
+```{r}
+# Define a function to create the recipe
+create_rf_recipe <- function(data) {
+  recipe(formula = hormon_iudor ~ ., data = data) %>%
+    step_zv(all_predictors()) %>% 
+    step_dummy(c('urban', 'sex_often', 'abortion', 
+                 'migback', 'relstat', 'empl', 
+                 'ethni', 'region', 'addchild', 
+                 'denomination')) %>%             # apply one-hot encoding (Nominal variables)
+    step_mutate(nkids = as.numeric(as.character(nkids))) %>% 
+    step_ordinalscore(c('bmi_category', 'rel', 
+                        'edu', 'health'))         # apply ordinal encoding (Ordinal variables)            
+}
+```
+
+
+```{r}
+# Extract the preprocessed training set
+df1_final <- create_rf_recipe(df1_cleaned) %>% prep() %>% juice() %>% 
+    mutate(hormon_iudor = as.integer(as.character(hormon_iudor)))
+df2_final <- create_rf_recipe(df2_cleaned) %>% prep() %>% juice() %>% 
+    mutate(hormon_iudor = as.integer(as.character(hormon_iudor)))
+df3_final <- create_rf_recipe(df3_cleaned) %>% prep() %>% juice() %>% 
+    mutate(hormon_iudor = as.integer(as.character(hormon_iudor)))
+df4_final <- create_rf_recipe(df4_cleaned) %>% prep() %>% juice() %>% 
+    mutate(hormon_iudor = as.integer(as.character(hormon_iudor)))
+
+# Save the preprocessed training set
+
+write.csv(df1_final, "data/df1_final.csv")
+write.csv(df2_final, "data/df2_final.csv")
+write.csv(df3_final, "data/df3_final.csv")
+write.csv(df4_final, "data/df4_final.csv")
+
+```

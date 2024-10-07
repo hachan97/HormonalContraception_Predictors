@@ -1,0 +1,11 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+
+# Large Stata Data files
+data/rf_coh1_27.dta
+data/rf_coh2_27.dta 
+data/rf_coh2_37.dta
+data/rf_coh3_37.dta
+
