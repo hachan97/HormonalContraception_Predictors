@@ -13,5 +13,10 @@ The introduction of the contraceptive pill revolutionized women's reproductive h
 This study utilizes data from the [pairfam](https://www.pairfam.de/en/data/) (Panel Analysis of Intimate Relationships and Family Dynamics) for Germany.
 
 ## Machine Learning Models:
-Random Forest
-XGBoost
+This project will compare the performance of Decision Tree, Random Forest, and XGBoost models to determine which approach is most effective for predicting hormonal contraceptive use. The final results and metrics will be documented in the full report.
+
+## Results:
+![SHAP Beeswarm Plot - Cohort 1 (Age 27)](plot_SHAP_beeswarm_coh1_27.png)
+![SHAP Beeswarm Plot - Cohort 1 (Age 27)](plot_SHAP_beeswarm_coh2_27.png)
+![SHAP Beeswarm Plot - Cohort 1 (Age 27)](plot_SHAP_beeswarm_coh2_37.png)
+![SHAP Beeswarm Plot - Cohort 1 (Age 27)](plot_SHAP_beeswarm_coh3_37.png)
