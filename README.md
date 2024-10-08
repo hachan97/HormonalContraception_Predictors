@@ -3,20 +3,25 @@
 ## Abstract
 The introduction of the contraceptive pill revolutionized women's reproductive health, but recent years have seen a decline in its use among younger women in Germany. This project investigates this trend using a machine learning approach.
 
-### Key Contributions:
+### Key Contributions
 - Examine generational variation in hormonal contraceptive use across birth cohorts.
 - Analyze the predictive power of 25 variables on hormonal contraceptive use using Random Forest and XGBoost models.
 - Identify key predictors across cohorts and interpret prediction patterns, including non-linearities and interactions.
 - Analyze data from the pairfam (Panel Analysis of Intimate Relationships and Family Dynamics) study.
 
-## Data Source:
+## Data Source
 This study utilizes data from the [pairfam](https://www.pairfam.de/en/data/) (Panel Analysis of Intimate Relationships and Family Dynamics) for Germany.
 
-## Machine Learning Models:
+## Machine Learning Models
 This project will compare the performance of Decision Tree, Random Forest, and XGBoost models to determine which approach is most effective for predicting hormonal contraceptive use. The final results and metrics will be documented in the full report.
 
-## Results:
-![SHAP Beeswarm Plot - Cohort 1 (Age 27)](plot_SHAP_beeswarm_coh1_27.png)
-![SHAP Beeswarm Plot - Cohort 1 (Age 27)](plot_SHAP_beeswarm_coh2_27.png)
-![SHAP Beeswarm Plot - Cohort 1 (Age 27)](plot_SHAP_beeswarm_coh2_37.png)
-![SHAP Beeswarm Plot - Cohort 1 (Age 27)](plot_SHAP_beeswarm_coh3_37.png)
+We employed a custom **Recursive Feature Elimination** (RFE) step to narrow-down the top most relevant predictors based on F-score and the ROC-AUC metric.
+
+## Results
+- We observed a 'period differences', with a shift from **family-demographic** to **personality** factors throughout the 2010s
+- We also observed variations of key predictors among cohorts in the same survey years: cohort differences
+<img src="plot_SHAP_beeswarm_coh1_27.png" alt="SHAP Beeswarm Plot - Cohort 1 (Age 27)" style="width: 50%; height: auto;">
+<img src="plot_SHAP_beeswarm_coh2_27.png" alt="SHAP Beeswarm Plot - Cohort 2 (Age 27)" style="width: 50%; height: auto;">
+<img src="plot_SHAP_beeswarm_coh2_37.png" alt="SHAP Beeswarm Plot - Cohort 2 (Age 37)" style="width: 50%; height: auto;">
+<img src="plot_SHAP_beeswarm_coh3_37.png" alt="SHAP Beeswarm Plot - Cohort 3 (Age 37)" style="width: 50%; height: auto;">
+
