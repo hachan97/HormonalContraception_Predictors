@@ -16,12 +16,28 @@ This study utilizes data from the [pairfam](https://www.pairfam.de/en/data/) (Pa
 This project will compare the performance of Decision Tree, Random Forest, and XGBoost models to determine which approach is most effective for predicting hormonal contraceptive use. The final results and metrics will be documented in the full report.
 
 We employed a custom **Recursive Feature Elimination** (RFE) step to narrow-down the top most relevant predictors based on F-score and the ROC-AUC metric.
+<table>
+  <tr>
+    <td><img src="RFE_plot_X1.png" alt="RFE Plot - Cohort 1 (Age 27)" style="width: 100%; height: auto;"></td>
+    <td><img src="RFE_plot_X2.png" alt="RFE Plot - Cohort 2 (Age 27)" style="width: 100%; height: auto;"></td>
+  </tr>
+  <tr>
+    <td><img src="RFE_plot_X3.png" alt="RFE Plot - Cohort 2 (Age 37)" style="width: 100%; height: auto;"></td>
+    <td><img src="RFE_plot_X4.png" alt="RFE Plot - Cohort 3 (Age 37)" style="width: 100%; height: auto;"></td>
+  </tr>
+</table>
 
 ## Results
 - We observed a 'period differences', with a shift from **family-demographic** to **personality** factors throughout the 2010s
 - We also observed variations of key predictors among cohorts in the same survey years: cohort differences
-<img src="plot_SHAP_beeswarm_coh1_27.png" alt="SHAP Beeswarm Plot - Cohort 1 (Age 27)" style="width: 50%; height: auto;">
-<img src="plot_SHAP_beeswarm_coh2_27.png" alt="SHAP Beeswarm Plot - Cohort 2 (Age 27)" style="width: 50%; height: auto;">
-<img src="plot_SHAP_beeswarm_coh2_37.png" alt="SHAP Beeswarm Plot - Cohort 2 (Age 37)" style="width: 50%; height: auto;">
-<img src="plot_SHAP_beeswarm_coh3_37.png" alt="SHAP Beeswarm Plot - Cohort 3 (Age 37)" style="width: 50%; height: auto;">
+<table>
+  <tr>
+    <td><img src="plot_SHAP_beeswarm_coh1_27.png" alt="SHAP Beeswarm Plot - Cohort 1 (Age 27)" style="width: 100%; height: auto;"></td>
+    <td><img src="plot_SHAP_beeswarm_coh2_27.png" alt="SHAP Beeswarm Plot - Cohort 2 (Age 27)" style="width: 100%; height: auto;"></td>
+  </tr>
+  <tr>
+    <td><img src="plot_SHAP_beeswarm_coh2_37.png" alt="SHAP Beeswarm Plot - Cohort 2 (Age 37)" style="width: 100%; height: auto;"></td>
+    <td><img src="plot_SHAP_beeswarm_coh3_37.png" alt="SHAP Beeswarm Plot - Cohort 3 (Age 37)" style="width: 100%; height: auto;"></td>
+  </tr>
+</table>
 
