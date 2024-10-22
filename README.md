@@ -1,4 +1,5 @@
 #  A machine learning approach: [Generational trends and predictors of hormonal contraceptive use in Germany](https://projectcontraception.github.io/sp1.html)
+Authored by [Theresa Nutz](https://theresanutz.github.io/), [Nora Müller](https://nrmllr.github.io/), and [Hao-Ting Chan](https://www.linkedin.com/in/bryanchan97/)
 
 ## Abstract
 The introduction of the contraceptive pill revolutionized women's reproductive health, but recent years have seen a decline in its use among younger women in Germany. This project investigates this trend using a machine learning approach.
