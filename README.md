@@ -16,6 +16,9 @@ This study utilizes data from the [pairfam](https://www.pairfam.de/en/data/) (Pa
 ## Machine Learning Models
 This project will compare the performance of Decision Tree, Random Forest, and XGBoost models to determine which approach is most effective for predicting hormonal contraceptive use. The final results and metrics will be documented in the full report.
 
+A preliminary comparison of our Random Forest and XGBoost model on the Validation set shows us that the Random Forest model performs better.
+![Model Performance on Validation Set](model_comparison_CVset.png)
+
 We employed a custom **Recursive Feature Elimination** (RFE) step to narrow-down the top most relevant predictors based on F-score and the ROC-AUC metric.
 <table>
   <tr>
